@@ -89,4 +89,26 @@ class ParanoidTest < ActiveSupport::TestCase
     ParanoidBoolean.only_deleted.first.recover
     assert_equal 3, ParanoidBoolean.count
   end
+
+  def test_callbacks_on_fake_removal
+    before = after = false
+    ParanoidBoolean.before_destroy { before = true }
+    ParanoidBoolean.after_destroy  { after = true }
+    paranoid_boolean = ParanoidBoolean.first
+    paranoid_boolean.destroy
+    assert before
+    assert after
+    assert !paranoid_boolean.destroyed?
+  end
+
+  def test_callbacks_on_real_removal
+    before = after = false
+    ParanoidBoolean.before_destroy { before = true }
+    ParanoidBoolean.after_destroy  { after = true }
+    paranoid_boolean = ParanoidBoolean.first
+    paranoid_boolean.destroy!
+    assert before
+    assert after
+    assert paranoid_boolean.destroyed?
+  end
 end

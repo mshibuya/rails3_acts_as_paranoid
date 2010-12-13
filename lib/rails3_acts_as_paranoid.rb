@@ -36,11 +36,12 @@ module ActsAsParanoid
       end
 
       def destroy!
-        before_destroy() if respond_to?(:before_destroy)
+        run_callbacks :destroy do
+          #{self.name}.delete_all!(:id => self.id)
 
-        #{self.name}.delete_all!(:id => self)
-
-        after_destroy() if respond_to?(:after_destroy)
+          @destroyed = true
+          freeze
+        end
       end
 
       def destroy
@@ -49,6 +50,9 @@ module ActsAsParanoid
             #{self.name}.delete_all(:id => self.id)
           else
             #{self.name}.delete_all!(:id => self.id)
+ 
+            @destroyed = true
+            freeze
           end
         end
       end
