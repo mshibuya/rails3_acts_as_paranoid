@@ -13,11 +13,10 @@ require 'test_helper'
 #Parent.with_deleted.count
 #Son.with_deleted.count
 
-class ParanoidTest < ActiveSupport::TestCase
-
+class ParanoidBase < ActiveSupport::TestCase
   def setup
     setup_db
-    
+
     ["paranoid", "really paranoid", "extremely paranoid"].each do |name|
       ParanoidTime.create! :name => name
       ParanoidBoolean.create! :name => name
@@ -29,19 +28,9 @@ class ParanoidTest < ActiveSupport::TestCase
   def teardown
     teardown_db
   end
+end
 
-  def assert_exception(exception)
-    begin
-      begin
-        yield
-      rescue exception
-        true
-      end
-    rescue
-      false
-    end
-  end
-
+class ParanoidTest < ParanoidBase
   def test_fake_removal
     assert_equal 3, ParanoidTime.count
     assert_equal 3, ParanoidBoolean.count
@@ -76,10 +65,10 @@ class ParanoidTest < ActiveSupport::TestCase
   end
 
   def test_paranoid_scope
-    assert_exception(NoMethodError) { NotParanoid.delete_all! }
-    assert_exception(NoMethodError) { NotParanoid.first.destroy! }
-    assert_exception(NoMethodError) { NotParanoid.with_deleted }
-    assert_exception(NoMethodError) { NotParanoid.only_deleted }    
+    assert_raise(NoMethodError) { NotParanoid.delete_all! }
+    assert_raise(NoMethodError) { NotParanoid.first.destroy! }
+    assert_raise(NoMethodError) { NotParanoid.with_deleted }
+    assert_raise(NoMethodError) { NotParanoid.only_deleted }    
   end
 
   def test_recovery
@@ -110,5 +99,106 @@ class ParanoidTest < ActiveSupport::TestCase
     assert before
     assert after
     assert paranoid_boolean.destroyed?
+  end
+
+  def setup_recursive_recovery_tests
+    @paranoid_time_object = ParanoidTime.first
+
+    @paranoid_boolean_count = ParanoidBoolean.count
+
+    assert_equal 0, ParanoidHasManyDependant.count
+    assert_equal 0, ParanoidBelongsDependant.count
+
+    (1..3).each do |i|
+      has_many_object = @paranoid_time_object.paranoid_has_many_dependants.create(:name => "has_many_#{i}")
+      has_many_object.create_paranoid_belongs_dependant(:name => "belongs_to_#{i}")
+      has_many_object.save
+
+      paranoid_boolean = @paranoid_time_object.paranoid_booleans.create(:name => "boolean_#{i}")
+      paranoid_boolean.create_paranoid_has_one_dependant(:name => "has_one_#{i}")
+      paranoid_boolean.save
+
+      @paranoid_time_object.not_paranoids.create(:name => "not_paranoid_a#{i}")
+
+    end
+
+    @paranoid_time_object.create_not_paranoid(:name => "not_paranoid_belongs_to")
+
+    @paranoid_time_object.create_has_one_not_paranoid(:name => "has_one_not_paranoid")
+
+    assert_equal 3, ParanoidTime.count
+    assert_equal 3, ParanoidHasManyDependant.count
+    assert_equal 3, ParanoidBelongsDependant.count
+    assert_equal 3, ParanoidHasOneDependant.count
+    assert_equal 5, NotParanoid.count
+    assert_equal 1, HasOneNotParanoid.count
+    assert_equal @paranoid_boolean_count + 3, ParanoidBoolean.count
+
+    @paranoid_time_object.destroy
+    @paranoid_time_object.reload
+
+    assert_equal 2, ParanoidTime.count
+    assert_equal 0, ParanoidHasManyDependant.count
+    assert_equal 0, ParanoidBelongsDependant.count
+    assert_equal 0, ParanoidHasOneDependant.count
+    puts NotParanoid.all.inspect
+    assert_equal 1, NotParanoid.count
+    assert_equal 0, HasOneNotParanoid.count
+    assert_equal @paranoid_boolean_count, ParanoidBoolean.count
+  end
+
+  def test_recursive_recovery
+    setup_recursive_recovery_tests
+
+    @paranoid_time_object.recover(:recursive => true)
+
+    assert_equal 3, ParanoidTime.count
+    assert_equal 3, ParanoidHasManyDependant.count
+    assert_equal 3, ParanoidBelongsDependant.count
+    assert_equal 3, ParanoidHasOneDependant.count
+    assert_equal 1, NotParanoid.count
+    assert_equal 0, HasOneNotParanoid.count
+    assert_equal @paranoid_boolean_count + 3, ParanoidBoolean.count
+  end
+
+  def test_non_recursive_recovery
+    setup_recursive_recovery_tests
+
+    @paranoid_time_object.recover(:recursive => false)
+
+    assert_equal 3, ParanoidTime.count
+    assert_equal 0, ParanoidHasManyDependant.count
+    assert_equal 0, ParanoidBelongsDependant.count
+    assert_equal 0, ParanoidHasOneDependant.count
+    assert_equal 1, NotParanoid.count
+    assert_equal 0, HasOneNotParanoid.count
+    assert_equal @paranoid_boolean_count, ParanoidBoolean.count
+
+  end
+
+  def test_deleted?
+    ParanoidTime.first.destroy
+    assert ParanoidTime.with_deleted.first.deleted?
+  end
+end
+
+class ValidatesUniquenessTest < ParanoidBase
+  def test_should_include_deleted_by_default
+    ParanoidTime.new(:name => 'paranoid').tap do |record|
+      assert !record.valid?
+      ParanoidTime.first.destroy
+      assert !record.valid?
+      ParanoidTime.only_deleted.first.destroy!
+      assert record.valid?
+    end
+  end
+
+  def test_should_validate_without_deleted
+    ParanoidBoolean.new(:name => 'paranoid').tap do |record|
+      ParanoidBoolean.first.destroy
+      assert record.valid?
+      ParanoidBoolean.only_deleted.first.destroy!
+      assert record.valid?
+    end
   end
 end
